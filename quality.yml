@@ -1,0 +1,123 @@
+# PATH: .github/workflows/quality.yml
+#
+# WHAT: CI quality gate — runs pre-delivery-check.sh on all .sh files and
+#       Python syntax check on backend/app.py on every push and PR.
+#
+# WHY:  receipts-ocr README confirms verbatim:
+#         "CI/CD: ✅ GitHub Actions deploy to Pages"
+#         "Quality Gates: ✅ 11 pre-commit hooks pass"
+#       pre-delivery-check.sh is this repo's equivalent of those 11 hooks.
+#       Running it in CI means a PR with unjustified 2>/dev/null cannot be merged.
+#
+# MENTAL MODEL BEFORE: compliance violations only caught locally when developer
+#   remembers to run pre-delivery-check.sh before pushing.
+# MENTAL MODEL AFTER:  CI fails immediately on any Rule S, Rule L, or syntax
+#   violation — PR cannot be merged until fixed.
+#
+# FAILURE MODE: if pre-delivery-check.sh exits non-zero, the workflow fails
+#   and GitHub marks the PR as "checks failing". The VIOLATION lines are
+#   visible in the Actions log.
+#
+# VERIFIES WITH: open a PR that adds an unjustified 2>/dev/null to any .sh file
+#   — the quality workflow should fail within 30 seconds.
+#
+# Source (Tier 4): swipswaps/receipts-ocr .github/workflows/quality.yml — CI gate pattern.
+#   https://github.com/swipswaps/receipts-ocr/blob/main/.github/workflows/quality.yml
+# Source (Tier 2): GitHub Actions docs — on: push + pull_request triggers.
+#   https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows
+
+name: Quality Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  shell-compliance:
+    name: Shell script compliance (pre-delivery-check.sh)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # WHAT: run the compliance checker against all .sh files in the repo.
+      # WHY:  pre-delivery-check.sh enforces Rule S (no unjustified suppression),
+      #       Rule L (log gates on state-changing functions), and citation checks.
+      #       Exit code is non-zero if any violation is found — CI fails.
+      # FAILURE MODE: if pre-delivery-check.sh itself is not in the repo,
+      #   this step fails with "No such file or directory".
+      #   Fix: ensure pre-delivery-check.sh is committed to the repo root.
+      # VERIFIES WITH: Actions log shows "Total violations: 0" on clean code.
+      - name: Run pre-delivery compliance check
+        run: |
+          echo "=== Shell compliance check ==="
+          # SUPPRESS-REASON: find exits 1 if no .sh files exist.
+          #   This is a valid result (new repo) — || true allows the check to proceed.
+          SH_FILES=$(find . -name "*.sh" -not -path "./.git/*" | sort || true)
+          if [ -z "$SH_FILES" ]; then
+            echo "No .sh files found — skipping"
+            exit 0
+          fi
+          echo "Checking files: $SH_FILES"
+          # SUPPRESS-REASON: bash -n on the checker itself — syntax validation only.
+          bash -n pre-delivery-check.sh
+          bash pre-delivery-check.sh $SH_FILES
+
+  python-syntax:
+    name: Python syntax check (backend/app.py)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # WHAT: verify backend/app.py is valid Python 3.12 syntax.
+      # WHY:  py_compile catches syntax errors that would crash the
+      #       Flask app at startup — before any Docker build.
+      # Source (Tier 2): Python docs — "py_compile checks syntax without running."
+      #   https://docs.python.org/3/library/py_compile.html
+      - name: Python syntax check
+        run: |
+          echo "=== Python syntax check ==="
+          python3 -m py_compile backend/app.py
+          echo "backend/app.py: syntax OK"
+
+  frontend-build:
+    name: Frontend build check (TypeScript + Vite)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # WHAT: TypeScript type-check without building — fast CI gate.
+      # WHY:  catches type errors that would break the runtime without the
+      #       full 30-second build time. Matches receipts-ocr quality check.
+      - name: TypeScript type-check
+        run: npm run typecheck
+
+      # WHAT: verify the production build completes successfully.
+      # WHY:  type-check passes but build can still fail (missing imports,
+      #       Vite config errors). Running build catches these.
+      - name: Production build
+        run: npm run build

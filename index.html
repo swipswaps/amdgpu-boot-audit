@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<!-- PATH: index.html
+     WHAT: Vite entry point for the boot-audit GitHub Pages frontend.
+     WHY:  Vite requires index.html at the project root as the build entry.
+     Source (Tier 2): Vite docs — "index.html is the entry point for the Vite dev server."
+       https://vitejs.dev/guide/#index-html-and-project-root
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description"
+          content="AMD GPU boot diagnostics dashboard — boot history, failure patterns, diff viewer" />
+    <title>amdgpu-boot-audit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@300;400;600;700&display=swap"
+          rel="stylesheet" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

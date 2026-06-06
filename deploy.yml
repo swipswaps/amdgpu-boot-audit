@@ -1,0 +1,128 @@
+# PATH: .github/workflows/deploy.yml
+#
+# WHAT: GitHub Actions workflow — builds the Vite+React frontend and deploys
+#       it to the gh-pages branch on every push to main.
+#
+# WHY:  GitHub Pages only serves static files. The workflow runs npm build
+#       (which outputs to dist/) and pushes dist/ to gh-pages.
+#       This is the exact pattern used by receipts-ocr and confirmed from
+#       search results verbatim:
+#         "Deploy: uses JamesIves/github-pages-deploy-action@v4
+#          This action takes the contents of dist and pushes it to gh-pages.
+#          (If gh-pages doesn't exist, it will be created.)"
+#       Source (Tier 3): Arafat Hussain, Medium, May 2025 — top result for
+#         "Vite gh-pages GitHub Actions":
+#         https://medium.com/@arafatDU/mastering-github-actions-deploy-react-app-to-github-pages-...
+#
+# MENTAL MODEL BEFORE: changes to src/ are not visible on Pages until manually pushed.
+# MENTAL MODEL AFTER:  every merge to main triggers a Pages rebuild within ~60s.
+#
+# FAILURE MODE: if npm run build fails (TypeScript error, missing dep),
+#   the workflow fails and the previous Pages version remains live.
+#   Fix: push will show the error in Actions → deploy → build step.
+#
+# VERIFIES WITH: after workflow completes, https://swipswaps.github.io/amdgpu-boot-audit/
+#   loads the React app with the updated code.
+#
+# Source (Tier 4): JamesIves/github-pages-deploy-action — "publishes to gh-pages branch."
+#   https://github.com/JamesIves/github-pages-deploy-action
+# Source (Tier 2): GitHub Actions docs — "permissions: contents: write needed for push."
+#   https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # WHAT: allow manual trigger from Actions UI for debugging.
+  # WHY:  if a push fails, can re-run without a new commit.
+  workflow_dispatch:
+
+# WHAT: grant write access to repo contents (needed to push to gh-pages branch).
+# WHY:  without contents: write, the deploy action cannot push to gh-pages.
+# Source (Tier 2): GitHub Actions docs — permissions.
+#   https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Vite frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      # WHAT: check out the source code at the pushed commit.
+      # Source (Tier 4): actions/checkout@v4.
+      #   https://github.com/actions/checkout
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # WHAT: set Node.js version to match receipts-ocr (Node 20 LTS).
+      # WHY:  Vite 5 requires Node 18+; 20 LTS is the stable choice.
+      # Source (Tier 4): actions/setup-node@v4.
+      #   https://github.com/actions/setup-node
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # WHAT: install exact dependency versions from package-lock.json.
+      # WHY:  npm ci is faster than npm install and guarantees reproducibility.
+      # Source (Tier 2): npm docs — "ci installs from package-lock.json exactly."
+      #   https://docs.npmjs.com/cli/v10/commands/npm-ci
+      - name: Install dependencies
+        run: npm ci
+
+      # WHAT: run TypeScript type-check before building.
+      # WHY:  catches type errors that would produce broken JavaScript.
+      #       matches receipts-ocr quality.yml TypeScript strict mode check.
+      - name: TypeScript type-check
+        run: npm run typecheck
+
+      # WHAT: build the production bundle into dist/.
+      # WHY:  Vite compiles TypeScript, bundles JS, and outputs to dist/.
+      #       vite.config.ts sets base: '/amdgpu-boot-audit/' so all asset
+      #       links work under the GitHub Pages subdirectory.
+      - name: Build production bundle
+        run: npm run build
+
+      # WHAT: upload dist/ as a build artifact for the deploy job.
+      # WHY:  separating build and deploy into two jobs allows the deploy
+      #       step to be skipped on forks (security) while still running build.
+      # Source (Tier 4): actions/upload-artifact@v4.
+      #   https://github.com/actions/upload-artifact
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: ./dist
+
+  deploy:
+    name: Deploy to gh-pages
+    needs: build
+    runs-on: ubuntu-latest
+    # WHAT: only deploy on pushes to main — not on PRs or forks.
+    # WHY:  prevents PRs from deploying untested code to production Pages.
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: ./dist
+
+      # WHAT: push dist/ to the gh-pages branch.
+      # WHY:  JamesIves/github-pages-deploy-action handles the force-push
+      #       to gh-pages branch without requiring manual git commands.
+      #       Confirmed pattern from search results:
+      #         "If gh-pages doesn't exist, it will be created."
+      # Source (Tier 4): JamesIves/github-pages-deploy-action@v4.
+      #   https://github.com/JamesIves/github-pages-deploy-action
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: ./dist
+          branch: gh-pages
+          clean: true

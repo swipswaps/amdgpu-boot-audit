@@ -1,0 +1,91 @@
+# PATH: docker-compose.yml
+#
+# WHAT: compose file that starts the boot-audit REST API container.
+#       Mounts the local boot_audit.db read-only into the container.
+#
+# WHY:  mirrors the receipts-ocr docker-compose.yml pattern:
+#       - named service with explicit port mapping
+#       - volume mount for data (DB here; models there)
+#       - env var for the data path
+#       - restart: unless-stopped for persistence across reboots
+#
+# MENTAL MODEL BEFORE: API container cannot see the local DB file.
+# MENTAL MODEL AFTER:  host path ${BOOT_AUDIT_DB} is mounted at
+#       /data/boot_audit.db inside the container, read-only.
+#
+# FAILURE MODE: if BOOT_AUDIT_DB path does not exist on the host,
+#       Docker silently creates an empty directory instead of a file.
+#       install.sh checks this before docker compose up.
+#
+# VERIFIES WITH:
+#   docker compose ps           -- shows "running" state
+#   docker compose logs         -- shows Flask startup messages
+#   curl localhost:5002/health  -- returns {"status":"ok"}
+#
+# Source (Tier 4): swipswaps/receipts-ocr docker-compose.yml — volume+port pattern.
+#   https://github.com/swipswaps/receipts-ocr/blob/main/docker-compose.yml
+# Source (Tier 2): Docker Compose docs — "volumes mounts host paths into containers."
+#   https://docs.docker.com/compose/compose-file/05-services/#volumes
+# Source (Tier 2): Docker Compose docs — "environment sets container env vars."
+#   https://docs.docker.com/compose/compose-file/05-services/#environment
+
+services:
+  boot-audit-api:
+    # WHAT: build the API image from backend/Dockerfile.
+    # WHY:  local build means no registry dependency; image is always current.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: boot-audit-api
+
+    ports:
+      # WHAT: map host port 5002 to container port 5002.
+      # WHY:  5002 avoids conflict with receipts-ocr (5001).
+      #       The GitHub Pages frontend connects to localhost:5002.
+      # Source (Tier 2): Docker docs — "HOST_PORT:CONTAINER_PORT mapping."
+      #   https://docs.docker.com/compose/compose-file/05-services/#ports
+      - "5002:5002"
+
+    volumes:
+      # WHAT: mount the SQLite DB from the host into the container.
+      # WHY:  the DB is written by boot-audit-db.sh on the host.
+      #       The container reads it without copying or moving it.
+      #       :ro ensures the container cannot accidentally write to the DB.
+      # FAILURE MODE: if the path does not exist as a FILE (not directory),
+      #   Docker creates an empty directory — container sees no DB.
+      #   Fix: run boot-audit-db.sh at least once before docker compose up.
+      # Source (Tier 2): Docker Compose docs — "ro makes mount read-only."
+      #   https://docs.docker.com/compose/compose-file/05-services/#volumes
+      - "${BOOT_AUDIT_DB:-~/.local/share/boot-audit/boot_audit.db}:/data/boot_audit.db:ro"
+
+    environment:
+      # WHAT: tell Flask where the DB is mounted inside the container.
+      # WHY:  app.py reads BOOT_AUDIT_DB at startup; if unset, it falls back
+      #       to ~/.local/share/boot-audit/boot_audit.db which does not exist
+      #       inside the container.
+      # Source (Tier 2): Docker Compose docs — environment.
+      #   https://docs.docker.com/compose/compose-file/05-services/#environment
+      - BOOT_AUDIT_DB=/data/boot_audit.db
+      - FLASK_DEBUG=0
+
+    restart: unless-stopped
+    # WHAT: restart policy keeps API available after host reboots.
+    # WHY:  the systemd boot-audit.service collects data on every boot;
+    #       the Docker API should also be available immediately after boot.
+    # Source (Tier 2): Docker docs — "unless-stopped restarts unless manually stopped."
+    #   https://docs.docker.com/config/containers/start-containers-automatically/
+
+    healthcheck:
+      # WHAT: Docker native health check polls /health endpoint.
+      # WHY:  docker compose ps shows "healthy" when API is ready;
+      #       prevents the Pages frontend from connecting before Flask starts.
+      # FAILURE MODE: if curl fails 3 times, container is marked "unhealthy".
+      #   Fix: docker compose logs boot-audit-api to see Flask errors.
+      # Source (Tier 2): Docker Compose docs — healthcheck.
+      #   https://docs.docker.com/compose/compose-file/05-services/#healthcheck
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
