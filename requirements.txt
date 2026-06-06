@@ -1,0 +1,108 @@
+# requirements.txt — amdgpu-boot-audit
+#
+# Runtime dependencies for amdgpu-hdmi-diagnostic-wizard.sh and boot-audit-db.sh
+#
+# FORMAT: package_name | purpose | install_command | tier
+#
+# Source (Tier 2): Fedora packaging guidelines —
+#   "All package names must match the exact dnf/rpm name."
+#   https://docs.fedoraproject.org/en-US/packaging-guidelines/
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# CORE REQUIRED — script aborts if these are missing
+# ─────────────────────────────────────────────────────────────────────────────
+
+sqlite3         # Boot audit database backend
+                # Install: sudo dnf install sqlite
+
+bash            # Shell interpreter (>=4.0 required for [[ ]] and local)
+                # Install: pre-installed on all targets
+
+journalctl      # systemd journal access — boot history, DRM logs, shutdown timing
+                # Install: sudo dnf install systemd  (pre-installed on Fedora)
+
+systemd-analyze # Boot timing analysis
+                # Install: sudo dnf install systemd  (pre-installed)
+
+lspci           # PCI device enumeration — GPU identification
+                # Install: sudo dnf install pciutils
+
+lsusb           # USB device enumeration — dock/hub detection
+                # Install: sudo dnf install usbutils
+
+xrandr          # X11 display output enumeration
+                # Install: sudo dnf install xorg-x11-server-utils
+
+grub2-editenv   # GRUB environment inspection and backup
+                # Install: sudo dnf install grub2-tools
+
+grubby          # Kernel argument management (add/remove/set-default)
+                # Install: sudo dnf install grubby
+
+mokutil         # Secure Boot MOK status
+                # Install: sudo dnf install mokutil
+
+efibootmgr      # EFI boot entry enumeration
+                # Install: sudo dnf install efibootmgr
+
+fwupdmgr        # Firmware update metadata and device listing
+                # Install: sudo dnf install fwupd
+
+loginctl        # Session and seat management
+                # Install: sudo dnf install systemd  (pre-installed)
+
+timeout         # Command time-bounding (used to prevent dnf stalls)
+                # Install: sudo dnf install coreutils  (pre-installed)
+
+lsinitrd        # Initramfs content listing — early KMS verification
+                # Install: sudo dnf install dracut  (pre-installed on Fedora)
+
+awk             # Log parsing — shutdown timing instrumentation
+                # Install: sudo dnf install gawk  (pre-installed)
+
+sha256sum       # grub.cfg integrity tracking
+                # Install: sudo dnf install coreutils  (pre-installed)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONAL — missing tools produce [WARN] lines, script continues
+# ─────────────────────────────────────────────────────────────────────────────
+
+glxinfo         # OpenGL renderer detection (llvmpipe vs hardware)
+                # Install: sudo dnf install glx-utils
+                # Fallback: skipped if DISPLAY is unset
+
+vulkaninfo      # Vulkan device/driver detection
+                # Install: sudo dnf install vulkan-tools
+
+dmidecode       # BIOS/baseboard firmware metadata (requires sudo)
+                # Install: sudo dnf install dmidecode
+
+inxi            # Human-readable hardware summary
+                # Install: sudo dnf install inxi  (may need RPM Fusion)
+
+drm_info        # Rich DRM/KMS topology dump (richest connector data)
+                # Install: not in standard Fedora repos — see RPM Fusion
+                #          or: https://gitlab.freedesktop.org/emersion/drm_info
+
+modetest        # DRM connector/CRTC/plane enumeration
+                # Install: not in standard Fedora repos
+                #          Part of libdrm-utils upstream
+
+rpm             # Installed kernel listing
+                # Install: pre-installed on Fedora/RHEL
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SUDO PERMISSIONS NEEDED
+# ─────────────────────────────────────────────────────────────────────────────
+# The following commands require sudo. On systems with kernel.dmesg_restrict=1
+# (Fedora 38+ default), dmesg requires root.
+#
+# Add to /etc/sudoers.d/boot-audit (via visudo):
+#
+#   %wheel ALL=(ALL) NOPASSWD: /usr/bin/dmesg
+#   %wheel ALL=(ALL) NOPASSWD: /usr/sbin/dmidecode
+#
+# Source (Tier 2): kernel sysctl kernel.dmesg_restrict —
+#   "Restrict unprivileged access to kernel syslog."
+#   https://www.kernel.org/doc/html/latest/admin-guide/sysctl/kernel.html
+# ─────────────────────────────────────────────────────────────────────────────

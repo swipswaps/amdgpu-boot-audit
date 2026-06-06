@@ -1,0 +1,27 @@
+# amdgpu-boot-audit .gitignore
+
+# Database files — contain machine-specific data, not for version control
+*.db
+*.db-shm
+*.db-wal
+
+# Generated prompt files — machine-specific
+boot-audit-prompts/
+
+# Diagnostic output directories — machine-specific, can be very large
+amdgpu-hdmi-diagnostics-*/
+
+# Backup files
+*.bak
+*.bak.*
+
+# Editor artifacts
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
