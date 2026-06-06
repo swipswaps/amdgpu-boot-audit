@@ -251,8 +251,36 @@ collect_boot_data() {
                 | grep -Ei "amdgpu.*error|amdgpu.*fail" | head -3 | tr '\n' '|')"
         fi
     else
-        AMDGPU_STATUS="absent"
-        AMDGPU_ERROR=""
+        # WHAT: dmesg tier produced no amdgpu lines — try sysfs and renderer.
+        # WHY:  document 17 confirmed: dmesg returned no amdgpu lines yet
+        #   renderer="AMD Radeon Graphics (radeonsi, renoir...)" and
+        #   gpu_power=D0 both confirmed GPU was bound. Status was wrongly
+        #   reported as "absent". Sysfs and renderer are reliable fallbacks.
+        # SUPPRESS-REASON: cat sysfs node and glxinfo may not exist;
+        #   || echo "" produces empty string handled by [[ -n ]] check.
+        # Source (Tier 2): sysfs power_state — D0 = device fully powered on.
+        #   https://www.kernel.org/doc/html/latest/gpu/amdgpu/driver-core.html
+        _POWER_STATE="$(cat /sys/class/drm/card*/device/power_state \
+            2>/dev/null | head -1 || echo "")"
+        # SUPPRESS-REASON: glxinfo stderr on no DISPLAY = noise; || echo "".
+        _RENDERER_AMD="$(glxinfo 2>/dev/null \
+            | grep -i "OpenGL renderer" | grep -iE "radeon|amdgpu|AMD" \
+            | head -1 || echo "")"
+        # SUPPRESS-REASON: ls sysfs driver symlink — may not exist on non-AMD.
+        _DRM_DRIVER="$(readlink /sys/class/drm/card0/device/driver \
+            2>/dev/null | grep -i amdgpu || echo "")"
+        if [[ "$_POWER_STATE" == "D0" ]] \
+            || [[ -n "$_RENDERER_AMD" ]] \
+            || [[ -n "$_DRM_DRIVER" ]]; then
+            AMDGPU_STATUS="bound"
+            AMDGPU_ERROR=""
+            log "  amdgpu_status: bound (sysfs/renderer fallback — dmesg had no amdgpu lines)"
+            log "    power_state=$_POWER_STATE driver=$_DRM_DRIVER"
+        else
+            AMDGPU_STATUS="absent"
+            AMDGPU_ERROR=""
+            log "  amdgpu_status: absent (dmesg, sysfs, and renderer all negative)"
+        fi
     fi
 
     # ── Boot type detection ───────────────────────────────────────────────────
@@ -527,6 +555,13 @@ write_snapshot() {
         log "Marked as WORKING STATE — id=$SNAPSHOT_ID"
     fi
 
+    # ALLOW-FAIL-REASON: grub_snapshots INSERT may fail on non-GRUB2 systems
+    #   (e.g. systemd-boot, LILO). || true allows the main boot_snapshots
+    #   INSERT to remain valid. The grub data is optional metadata.
+    # Source (Tier 2): SQLite INSERT — "INSERT OR IGNORE" as alternative.
+    #   https://www.sqlite.org/lang_insert.html
+    # Source (Tier 2): bash(1) — "||" runs right side only on non-zero exit.
+    #   https://man7.org/linux/man-pages/man1/bash.1.html
     sqlite3 "$DB_PATH" \
         "INSERT INTO grub_snapshots
             (ts,grub_default,grub_cmdline,grub_cfg_hash,kernel_list)
@@ -535,9 +570,6 @@ write_snapshot() {
              '$(_esc "$GRUB_DEFAULT")',
              '$(_esc "$GRUB_CMDLINE")',
              '$(_esc "$GRUB_CFG_HASH")',
-             # ALLOW-FAIL-REASON: grub_snapshots INSERT fails on non-GRUB2
-             #   systems. || true keeps the boot snapshot intact.
-             # Source (Tier 2): SQLite INSERT. https://www.sqlite.org/cli.html
              '$(_esc "$KERNEL_LIST")');" || true
 }
 
